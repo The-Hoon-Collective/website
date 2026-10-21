@@ -30,9 +30,23 @@ Deno.serve(async req=>{
  };
  const template=templates[item.template];
  if(!template)return json(422,{error:'Unknown template'});
+ const escapeHtml=(value:unknown)=>String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+ const memberNumber=String(item.payload?.membership_number??'').trim();
+ const isCard=item.template==='membership_activated';
+ // Use public artwork only; member details are inserted in this private recipient's email.
+ const art='https://the-hoon-collective.github.io/website/assets/thc-membership-card.png';
+ const cardHtml=isCard&&memberNumber&&expiry?
+  '<div style="max-width:620px;background:#181818;color:#fff;border:2px solid #c91f28;border-radius:12px;overflow:hidden;font-family:Arial,sans-serif">'+
+  '<img src="'+art+'" alt="The Hoon Collective automotive membership card" style="display:block;width:100%;height:auto" />'+
+  '<div style="padding:18px 22px;border-top:3px solid #c91f28">'+
+  '<div style="color:#bfc3c7;font-size:11px;letter-spacing:2px">MEMBER</div>'+
+  '<div style="font-size:26px;font-weight:bold;margin:5px 0 18px">'+escapeHtml(item.payload?.name)+'</div>'+
+  '<div style="border-top:1px solid #c91f28;padding-top:12px"><div style="color:#bfc3c7;font-size:11px">MEMBERSHIP NUMBER</div><strong>'+escapeHtml(memberNumber)+'</strong>'+
+  '<div style="color:#bfc3c7;font-size:11px;margin-top:12px">VALID UNTIL</div><strong>'+escapeHtml(expiry)+'</strong></div></div></div>':'';
+ const html=isCard?'<div style="font-family:Arial,sans-serif;color:#181818"><p>Hi '+escapeHtml(name)+',</p><p>Your verified $50 AUD membership payment has been recorded. Your personalised THC membership card is below.</p>'+cardHtml+'<p>Your membership number is '+escapeHtml(memberNumber)+'. Valid until '+escapeHtml(expiry)+'.</p><p>THC Team</p></div>':undefined;
  const [subject,body]=template;
  try{
-  const res=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:`Bearer ${apiKey}`,'content-type':'application/json','Idempotency-Key':item.id},body:JSON.stringify({from:sender,to:[item.recipient],reply_to:'thehooncollective@outlook.com',subject,text:body.replaceAll('\\n','\n')})});
+  const res=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:`Bearer ${apiKey}`,'content-type':'application/json','Idempotency-Key':item.id},body:JSON.stringify({from:sender,to:[item.recipient],reply_to:'thehooncollective@outlook.com',subject,html,text:body.replaceAll('\\n','\n')})});
   if(!res.ok){await db.from('thc_email_outbox').update({last_error:'Resend HTTP '+res.status,claimed_at:null}).eq('id',item.id);return json(502,{error:'Email provider rejected message',status:res.status})}
   await db.from('thc_email_outbox').update({sent_at:new Date().toISOString(),last_error:null}).eq('id',item.id);
   return json(200,{processed:1});
