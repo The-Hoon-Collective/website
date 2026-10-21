@@ -19,6 +19,13 @@ Deno.serve(async(req)=>{
  const dob=new Date(date_of_birth+'T00:00:00Z');if(!Number.isFinite(dob.getTime())||dob.toISOString().slice(0,10)!==date_of_birth)return respond(400,{error:'Invalid date of birth'});
  const now=new Date();let age=now.getUTCFullYear()-dob.getUTCFullYear();if(now.getUTCMonth()<dob.getUTCMonth()||(now.getUTCMonth()===dob.getUTCMonth()&&now.getUTCDate()<dob.getUTCDate()))age--;
  if(age<18||age>120)return respond(400,{error:'Applicants must be at least 18'});
+ const turnstileSecret=Deno.env.get('TURNSTILE_SECRET_KEY');
+ if(!turnstileSecret)return respond(503,{error:'Application security is not configured'});
+ const token=str('turnstileToken',2048);
+ if(!token)return respond(400,{error:'Security check required'});
+ let challenge;
+ try{const verify=await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({secret:turnstileSecret,response:token,remoteip:req.headers.get('cf-connecting-ip')||''})});if(!verify.ok)return respond(503,{error:'Security verification unavailable'});challenge=await verify.json()}catch{return respond(503,{error:'Security verification unavailable'})}
+ if(!challenge.success||challenge.hostname!=='the-hoon-collective.github.io')return respond(403,{error:'Security check failed. Please retry.'});
  const url=Deno.env.get('SUPABASE_URL'),secret=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
  if(!url||!secret)return respond(503,{error:'Application service not configured'});
  const db=createClient(url,secret,{auth:{persistSession:false}});
