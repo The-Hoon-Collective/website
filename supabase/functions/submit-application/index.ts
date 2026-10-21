@@ -29,6 +29,14 @@ Deno.serve(async(req)=>{
  const url=Deno.env.get('SUPABASE_URL'),secret=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
  if(!url||!secret)return respond(503,{error:'Application service not configured'});
  const db=createClient(url,secret,{auth:{persistSession:false}});
+ // Private, atomic per-email throttle; keyed hash avoids storing applicant emails in the throttle table.
+ const rateSalt=Deno.env.get('MEMBERSHIP_RATE_LIMIT_SECRET');
+ if(!rateSalt)return respond(503,{error:'Application security is not configured'});
+ const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(rateSalt+':'+email));
+ const fingerprint=Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+ const {data:allowed,error:rateError}=await db.rpc('claim_membership_submission_slot',{p_fingerprint:fingerprint});
+ if(rateError){console.error('Submission throttle failed',rateError.code);return respond(503,{error:'Application security is unavailable'})}
+ if(allowed!==true)return respond(429,{error:'Too many attempts. Please try again later.'});
  const {error}=await db.from('membership_applications').insert({full_name,preferred_name:preferred_name||null,date_of_birth,email,phone,suburb,state,vehicle:vehicle||null,interests:interests||null,reason,prospect_terms_accepted:true,conduct_accepted:true,accuracy_confirmed:true});
  if(error){console.error('Application insert failed',error.code);return respond(503,{error:'Unable to save application. Please try again later.'})}
  return respond(201,{message:'Your application has been received. THC will review it.'});
